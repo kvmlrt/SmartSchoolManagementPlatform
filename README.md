@@ -1,0 +1,2 @@
+# SmartSchoolManagementPlatform
+java开发的前后分离的线上管理与线上网课的学生老师管理平台
