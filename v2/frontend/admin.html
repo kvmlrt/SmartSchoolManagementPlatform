@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>管理员端 · 在线教育</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <style>
+    :root { --ink:#0f172a; --muted:#6b7280; --accent:#0ea5e9; --bg:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%); }
+    * { font-family:'Space Grotesk','Helvetica Neue',sans-serif; }
+    body { background: var(--bg); color: var(--ink); }
+    .app { max-width: 1200px; margin: 0 auto; padding: 28px 16px 52px; }
+    .card { border:0; box-shadow:0 10px 28px rgba(0,0,0,0.08); }
+    .scroll-box { max-height: 260px; overflow: auto; }
+    .bar-row { display:flex; align-items:center; gap:8px; font-family:monospace; font-size:13px; }
+    .bar { height:8px; background: var(--accent); border-radius: 4px; min-width:8px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h2 class="mb-0">管理员 / 年级主任</h2>
+        <div class="text-muted small">统计分析 · 报表 · 成绩维护 · 教师列表</div>
+        <div class="text-warning small">说明：仅 ADMIN 角色；课程审核已接通后端接口；用户账号管理已开放。</div>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <div id="user-info" class="small text-muted">检测登录中…</div>
+        <a class="btn btn-outline-primary btn-sm" href="user-admin.html">用户管理</a>
+        <a class="btn btn-outline-success btn-sm" href="analytics.html">可视化</a>
+        <button class="btn btn-outline-secondary btn-sm" onclick="logout()">退出</button>
+        <a class="btn btn-outline-primary btn-sm" href="index.html">返回首页</a>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">统计</div>
+            <div class="row g-2 mb-2">
+              <div class="col-6"><input id="stat-grade" type="number" class="form-control" placeholder="年级ID" /></div>
+              <div class="col-6"><input id="stat-class" type="number" class="form-control" placeholder="班级ID" /></div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+              <button class="btn btn-outline-primary btn-sm" onclick="loadStatsUsers()">用户数</button>
+              <button class="btn btn-outline-primary btn-sm" onclick="loadGradeDistribution()">年级分布</button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="loadGradeLines()">年级曲线</button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="loadGradeScoreSeries()">年级科目柱状</button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="loadClassLines()">班级曲线</button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="loadClassScoreSeries()">班级科目柱状</button>
+            </div>
+            <pre id="stats-box" class="small scroll-box">等待请求…</pre>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">报表 · 成绩单</div>
+            <div class="row g-2 mb-2">
+              <div class="col-6 d-flex gap-2">
+                <select id="report-grade" class="form-select"></select>
+                <button class="btn btn-outline-primary" onclick="loadReportClasses()">取班级</button>
+              </div>
+              <div class="col-6 d-flex gap-2">
+                <select id="report-class" class="form-select"></select>
+                <button class="btn btn-outline-primary" onclick="loadStudentGrades()">学生成绩</button>
+              </div>
+            </div>
+            <button class="btn btn-outline-primary btn-sm mb-2" onclick="loadGradeLevels()">加载年级列表</button>
+            <pre id="reports-box" class="small scroll-box">等待加载…</pre>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="fw-semibold">班级管理</div>
+              <button class="btn btn-outline-primary btn-sm" onclick="loadManageClasses()">刷新</button>
+            </div>
+            <div class="d-flex gap-2 mb-2">
+              <select id="manage-grade" class="form-select" style="max-width:220px;"></select>
+              <button class="btn btn-outline-primary btn-sm" onclick="loadManageClasses()">查看班级</button>
+            </div>
+            <div id="manage-class-box" class="small text-muted scroll-box" style="min-height:140px;">未加载</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">成绩维护</div>
+            <div class="row g-2 mb-2">
+              <div class="col-6"><input id="grade-id" class="form-control" placeholder="成绩ID(更新填)" /></div>
+              <div class="col-6"><input id="grade-score" type="number" step="0.01" class="form-control" placeholder="分数" /></div>
+              <div class="col-6"><input id="grade-student" type="number" class="form-control" placeholder="学生ID" /></div>
+              <div class="col-6"><input id="grade-course" type="number" class="form-control" placeholder="课程ID" /></div>
+              <div class="col-6"><input id="grade-class" type="number" class="form-control" placeholder="班级ID" /></div>
+              <div class="col-6"><input id="grade-type" class="form-control" placeholder="类型(可选)" /></div>
+            </div>
+            <textarea id="grade-remarks" class="form-control mb-2" rows="2" placeholder="备注"></textarea>
+            <button class="btn btn-primary w-100" onclick="saveGrade()">保存/更新</button>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">教师列表</div>
+            <button class="btn btn-outline-primary btn-sm mb-2" onclick="loadTeachers()">刷新</button>
+            <div id="admin-teacher-box" class="small text-muted scroll-box">未加载</div>
+            <div class="text-muted small mt-3">课程审核：下方课程卡片可审核。</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="fw-semibold">教师在线课</div>
+              <button class="btn btn-outline-primary btn-sm" onclick="loadTeachers()">刷新</button>
+            </div>
+            <div id="teacher-links" class="row g-2 small text-muted">未加载</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="fw-semibold">作业任务</div>
+              <button class="btn btn-outline-primary btn-sm" onclick="loadAssignments()">刷新</button>
+            </div>
+            <div class="small text-muted mb-2">点击作业查看详情</div>
+            <div id="assignment-list" class="small" style="min-height:160px;">未加载</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="fw-semibold">作业信息</div>
+              <button class="btn btn-outline-primary btn-sm" onclick="reloadSelectedAssignment()">刷新当前</button>
+            </div>
+            <pre id="assignment-info-box" class="small text-muted mb-0" style="min-height:160px;">请在左侧点击作业查看详情</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mt-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <div class="fw-semibold">视频审核</div>
+            <div class="text-muted small">真实待审核列表，可通过/不通过并填写备注</div>
+          </div>
+          <button class="btn btn-sm btn-outline-primary" onclick="loadPendingVideos()">刷新待审核</button>
+        </div>
+        <div id="video-review-list" class="row g-3"><div class="col-12 text-muted">点击“刷新待审核”加载</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.7/dist/axios.min.js"></script>
+  <script>
+    axios.defaults.withCredentials=true;
+    let API='http://39.106.139.93:8081/api/v2';
+    let currentUser=null;
+
+    function setApiFromQuery(){ const p=new URLSearchParams(location.search); const api=p.get('api'); if(api) API=api.replace(/\/$/,''); }
+    function ensureAdmin(role){ if(role!=='ADMIN'){ document.getElementById('user-info').textContent='当前角色无权限，请用管理员登录'; return false; } return true; }
+
+    let initialized=false;
+    let selectedAssignmentId=null;
+    async function loadMe(){
+      try{
+        const {data}=await axios.get(`${API}/auth/me`);
+        if(!data.loggedIn){ document.getElementById('user-info').textContent='未登录，请先返回首页登录'; return; }
+        currentUser=data;
+        if(!ensureAdmin(data.role)) return;
+        document.getElementById('user-info').textContent=`${data.username} (${data.role})`;
+        if(!initialized){ initialized=true; initAdminData(); }
+      }catch(_){ document.getElementById('user-info').textContent='会话检查失败，请重试或重新登录'; }
+    }
+
+    function initAdminData(){
+      loadStatsUsers();
+      loadGradeLevels();
+      loadManageGradeLevels();
+      loadTeachers();
+      loadCourses();
+      loadAssignments();
+    }
+
+    async function loadManageGradeLevels(){
+      const sel=document.getElementById('manage-grade');
+      const box=document.getElementById('manage-class-box');
+      sel.innerHTML='<option>加载中…</option>';
+      try{
+        const data=await safeGet('/reports/grade-levels');
+        if(!data||!data.length){ sel.innerHTML='<option value="">无年级</option>'; box.textContent='暂无班级'; return; }
+        sel.innerHTML=data.map(g=>`<option value="${g.id}">${g.name||('年级'+g.id)}</option>`).join('');
+        sel.value=data[0].id;
+        await loadManageClasses();
+      }catch(e){ sel.innerHTML='<option value="">加载失败</option>'; if(box) box.textContent='年级加载失败'; }
+    }
+
+    async function loadManageClasses(){
+      const gid=document.getElementById('manage-grade')?.value;
+      const box=document.getElementById('manage-class-box');
+      if(!gid){ box.textContent='请选择年级'; return; }
+      box.textContent='加载中…';
+      try{
+        const data=await safeGet(`/reports/grade-levels/${gid}/classes`);
+        if(!data||!data.length){ box.textContent='该年级暂无班级'; return; }
+        box.textContent=data.map(c=>`班级:${c.name||'-'} (#${c.id??'-'})`).join('\n');
+      }catch(e){ box.textContent=`加载失败：${e?.response?.data||e?.message||'错误'}`; }
+    }
+
+    async function safeGet(path){ const {data}=await axios.get(`${API}${path}`); return data; }
+    function showError(boxId,msg){ const box=document.getElementById(boxId); if(box) box.innerHTML=`<div class="col-12 text-danger">${msg}</div>`; }
+
+    function formatSize(s){ if(!s) return '-'; const n=Number(s); if(n>1e9) return (n/1e9).toFixed(2)+' GB'; if(n>1e6) return (n/1e6).toFixed(2)+' MB'; if(n>1e3) return (n/1e3).toFixed(1)+' KB'; return n+' B'; }
+
+    function barRows(items){
+      const max=Math.max(...items.map(i=>i.val||0),1);
+      return items.map(i=>`<div class="bar-row"><div class="bar" style="width:${(i.val||0)/max*120}px"></div><span>${i.name}: ${i.val??'--'}</span></div>`).join('');
+    }
+
+    function renderStats(title,data){
+      const box=document.getElementById('stats-box');
+      if(!data || (Array.isArray(data)&&!data.length)) { box.textContent=`${title}: 暂无数据`; return; }
+      if(Array.isArray(data)){
+        const items=data.map(item=>({
+          name:item.name||item.label||item.className||item.gradeName||item.subject||'项',
+          val:item.value??item.total??item.count??item.score??item.average
+        }));
+        box.innerHTML=`${title}:`+barRows(items);
+        return;
+      }
+      const parts=[];
+      if(data.totalUsers) parts.push({name:'总用户', val:data.totalUsers});
+      if(data.totalStudents) parts.push({name:'学生', val:data.totalStudents});
+      if(data.totalTeachers) parts.push({name:'教师', val:data.totalTeachers});
+      if(data.totalAdmins) parts.push({name:'管理员', val:data.totalAdmins});
+      if(!parts.length) { box.textContent=`${title}:\n`+JSON.stringify(data,null,2); return; }
+      box.innerHTML=`${title}:`+barRows(parts);
+    }
+
+    async function loadStatsUsers(){ const data=await safeGet('/stats/users'); renderStats('用户数', data); }
+    async function loadGradeDistribution(){ const data=await safeGet('/stats/grade-distribution'); renderStats('年级分布', data); }
+    async function loadGradeLines(){ const gid=document.getElementById('stat-grade').value; if(!gid) return alert('填入年级ID'); const data=await safeGet(`/stats/grade-line?gradeLevelId=${gid}`); renderStats('年级曲线', data.series||data); }
+    async function loadClassLines(){ const cid=document.getElementById('stat-class').value; if(!cid) return alert('填入班级ID'); const data=await safeGet(`/stats/class-line?classId=${cid}`); renderStats('班级曲线', data.series||data); }
+    async function loadGradeScoreSeries(){ const data=await safeGet('/stats/grade-score-series'); renderStats('年级科目柱状', data.series||data); }
+    async function loadClassScoreSeries(){ const gid=document.getElementById('stat-grade').value; const path=gid?`/stats/class-score-series?gradeLevelId=${gid}`:'/stats/class-score-series'; const data=await safeGet(path); renderStats('班级科目柱状', data.series||data); }
+
+    function renderReports(title,data){
+      const box=document.getElementById('reports-box');
+      if(!data || (Array.isArray(data)&&!data.length)){ box.textContent=`${title}: 暂无数据`; return; }
+      if(Array.isArray(data)){
+        const items=data.map(item=>({
+          name:item.name||item.className||item.studentName||item.subject||'项',
+          val:item.score??item.average??item.total??item.value
+        }));
+        box.innerHTML=`${title}:`+barRows(items);
+      } else {
+        box.textContent=`${title}:\n`+JSON.stringify(data,null,2);
+      }
+    }
+
+    function renderStudentGrades(data){
+      const box=document.getElementById('reports-box');
+      if(!data||!data.length){ box.textContent='学生成绩: 暂无数据'; return; }
+      const lines=data.map(s=>{
+        const header=`学生:${s.name||'-'} (${s.studentNo||'-'}) | 班级:${s.className||'-'} | 年级:${s.gradeLevel||'-'}`;
+        if(!s.grades||!s.grades.length) return `<div>${header} | 成绩: 无</div>`;
+        const max=Math.max(...s.grades.map(g=>g.score||g.grade||0),1);
+        const gs=s.grades.map(g=>{
+          const score=g.score??g.grade??0;
+          const status=typeof score==='number'?(score>=60?'及格':'不及格'):'未知';
+          return `<div class="bar-row"><div class="bar" style="width:${score/max*120}px"></div><span>课程:${g.courseId??'-'} 分数:${score} 状态:${status}${g.type?` 类型:${g.type}`:''}</span></div>`;
+        }).join('');
+        return `<div class="mb-2"><div class="fw-semibold" style="font-size:13px;">${header}</div>${gs}</div>`;
+      });
+      box.innerHTML='学生成绩:'+lines.join('');
+    }
+
+    async function loadGradeLevels(){ const data=await safeGet('/reports/grade-levels'); const sel=document.getElementById('report-grade'); sel.innerHTML=data.map(gl=>`<option value="${gl.id}">${gl.name}</option>`).join(''); if(data[0]){ sel.value=data[0].id; await loadReportClasses(); } renderReports('年级列表', data); }
+    async function loadReportClasses(){ const gid=document.getElementById('report-grade').value; if(!gid) return; const data=await safeGet(`/reports/grade-levels/${gid}/classes`); const sel=document.getElementById('report-class'); sel.innerHTML=data.map(c=>`<option value="${c.id}">${c.name}</option>`).join(''); if(data[0]) sel.value=data[0].id; renderReports('班级列表', data); }
+    async function loadStudentGrades(){ const cid=document.getElementById('report-class').value; if(!cid) return alert('选择班级'); const data=await safeGet(`/reports/classes/${cid}/student-grades`); renderStudentGrades(data); }
+
+    function renderAssignmentInfo(data){
+      const box=document.getElementById('assignment-info-box');
+      if(!box) return;
+      if(!data){ box.textContent='未加载'; return; }
+      const a=data.assignment||{};
+      const subs=data.submissions||[];
+      const due=a.dueDate||'-';
+      const header=`作业:${a.title||'-'}\n描述:${a.description||''}\n课程:${a.courseId??'-'} 截止:${due} 创建:${a.createdBy??'-'}`;
+      if(!subs.length){ box.textContent=header+"\n提交: 暂无"; return; }
+      const lines=subs.map(s=>{
+        const score=s.grade??'-';
+        const status=s.status||'SUBMITTED';
+        return `提交:${s.id??'-'} | 学生:${s.studentId??'-'} | 状态:${status} | 分数:${score} | 评语:${s.remarks||''}`;
+      }).join('\n');
+      box.textContent=`${header}\n提交(${subs.length}):\n${lines}`;
+    }
+
+    async function loadAssignmentInfo(id){
+      if(!id) return;
+      selectedAssignmentId=id;
+      const box=document.getElementById('assignment-info-box');
+      if(box) box.textContent='加载中…';
+      try{
+        const data=await safeGet(`/assignments/${id}/info`);
+        renderAssignmentInfo(data);
+      }catch(e){ if(box) box.textContent=`加载失败：${e?.response?.data||e?.message||'错误'}`; }
+    }
+
+    function reloadSelectedAssignment(){ if(selectedAssignmentId) loadAssignmentInfo(selectedAssignmentId); }
+
+    async function saveGrade(){ const id=document.getElementById('grade-id').value; const payload={ studentId:parseInt(document.getElementById('grade-student').value)||null, courseId:parseInt(document.getElementById('grade-course').value)||null, score:parseFloat(document.getElementById('grade-score').value)||null, modifiedBy: currentUser?.id || null, classId:parseInt(document.getElementById('grade-class').value)||null, type:document.getElementById('grade-type').value||null, remarks:document.getElementById('grade-remarks').value||null }; try{ let data; if(id){ ({data}=await axios.put(`${API}/grades/${id}`, payload)); }else{ ({data}=await axios.post(`${API}/grades`, payload)); } alert('已保存'); document.getElementById('stats-box').textContent=JSON.stringify(data,null,2); }catch(e){ alert('保存失败'); } }
+
+    function renderAssignments(data){
+      const box=document.getElementById('assignment-list');
+      if(!box) return;
+      if(!data||!data.length){ box.textContent='暂无作业'; return; }
+      box.innerHTML='';
+      data.forEach(a=>{
+        const due=a.dueDate||'-';
+        const item=document.createElement('div');
+        item.className='mb-1';
+        item.innerHTML=`<a href="#" class="text-decoration-none" onclick="loadAssignmentInfo(${a.id}); return false;">${a.title||'未命名作业'}</a> · 截止:${due}`;
+        box.appendChild(item);
+      });
+      if(!selectedAssignmentId && data[0]?.id) loadAssignmentInfo(data[0].id);
+    }
+
+    async function loadAssignments(){
+      const box=document.getElementById('assignment-list');
+      if(box) box.textContent='加载中…';
+      try{
+        const data=await safeGet('/assignments');
+        renderAssignments(data);
+      }catch(e){ if(box) box.textContent=`加载失败：${e?.response?.data||e?.message||'错误'}`; }
+    }
+
+    function renderTeacherLinks(data){
+      const box=document.getElementById('teacher-links');
+      if(!box) return;
+      if(!data||!data.length){ box.innerHTML='<div class="col-12 text-muted">暂无教师</div>'; return; }
+      box.innerHTML='';
+      data.forEach(t=>{
+        const col=document.createElement('div');
+        col.className='col-12 col-md-6';
+        const tid=t.id??'';
+        // Card is the link to the teacher's video page
+        col.innerHTML=`<a class="border rounded p-2 h-100 d-block text-decoration-none text-reset" href="videos.html?teacherId=${tid}">`
+          +`<div class="fw-semibold">${t.username||'教师'} <span class="text-muted">#${tid}</span></div>`
+          +`<div class="text-muted">角色: ${t.role||'TEACHER'}</div>`
+          +`<div class="text-muted">点击打开该教师的视频列表</div>`
+          +`</a>`;
+        box.appendChild(col);
+      });
+    }
+
+    async function loadTeachers(){
+      const box=document.getElementById('admin-teacher-box');
+      try{
+        const data=await safeGet('/users/teachers');
+        if(!data||!data.length){ box.textContent='暂无教师'; renderTeacherLinks(data); return; }
+        box.textContent=data.map(t=>`教师:${t.username||'-'} (#${t.id??'-'})`).join('\n');
+        renderTeacherLinks(data);
+      }catch(e){
+        box.innerHTML=`<span class="text-danger">加载教师失败：${e?.response?.status===403?'无权限/未登录':(e?.response?.data||'错误')}</span>`;
+        renderTeacherLinks([]);
+      }
+    }
+
+    function renderCourseCards(data){ const box=document.getElementById('course-list'); box.innerHTML=''; if(!data.length){ box.innerHTML='<div class="col-12 text-muted">暂无课程</div>'; return; } data.forEach(c=>{ const col=document.createElement('div'); col.className='col-12 col-md-6'; const approved=c.approved===true; col.innerHTML=`<div class="card h-100"><div class="card-body"><div class="d-flex justify-content-between align-items-center mb-2"><h5 class="card-title mb-0">${c.title||'未命名'}</h5><span class="badge ${approved?'bg-success':'bg-warning text-dark'}">${approved?'已审核':'待审核'}</span></div><p class="text-muted small mb-2">${c.description||'暂无描述'}</p><div class="d-flex gap-2 flex-wrap mb-2"><span class="badge bg-light text-dark">#${c.id}</span><span class="badge bg-light text-dark">教师:${c.teacherId??'未指定'}</span></div><div class="d-flex gap-2 flex-wrap"><a class="btn btn-sm btn-outline-primary" href="teacher.html?teacherId=${c.teacherId||''}">教师页</a><a class="btn btn-sm btn-outline-secondary" href="videos.html?teacherId=${c.teacherId||''}">📹 课程视频</a><button class="btn btn-sm ${approved?'btn-outline-secondary':'btn-success'}" onclick="approveCourse(${c.id}, ${!approved})">${approved?'取消审核':'审核通过'}</button></div></div></div>`; box.appendChild(col); }); }
+    async function loadCourses(){ const box=document.getElementById('course-list'); box.innerHTML='<div class="col-12 text-muted">加载中…</div>'; try{ const data=await safeGet('/admin/courses'); renderCourseCards(data); }catch(e){ box.innerHTML=`<div class="col-12 text-danger">加载课程失败：${e?.response?.status===403?'无权限/请先管理员登录':(e?.response?.data||'错误')}</div>`; } }
+    async function loadPending(){ const box=document.getElementById('course-list'); box.innerHTML='<div class="col-12 text-muted">加载中…</div>'; try{ const data=await safeGet('/admin/courses?pending=true'); renderCourseCards(data); }catch(e){ box.innerHTML=`<div class="col-12 text-danger">加载课程失败：${e?.response?.status===403?'无权限/请先管理员登录':(e?.response?.data||'错误')}</div>`; } }
+    async function approveCourse(id, approved){ await axios.put(`${API}/admin/courses/${id}/approve?approved=${approved}`); loadCourses(); }
+
+    async function loadPendingVideos(){
+      const box=document.getElementById('video-review-list');
+      box.innerHTML='<div class="col-12 text-muted">加载中…</div>';
+      try{
+        const data=await safeGet('/videos/review');
+        renderVideoReview(data);
+      }catch(e){
+        const msg=e?.response?.status===403?'无权限，请使用管理员账号重新登录':(e?.response?.data||'加载失败');
+        box.innerHTML=`<div class="col-12 text-danger">${msg}</div>`;
+      }
+    }
+    function renderVideoReview(data){ const box=document.getElementById('video-review-list'); if(!data||!data.length){ box.innerHTML='<div class="col-12 text-muted">暂无待审核视频</div>'; return; } box.innerHTML=''; data.forEach(v=>{ const col=document.createElement('div'); col.className='col-12 col-md-6'; const uploaded=v.uploadedAt?String(v.uploadedAt).replace('T',' '):''; col.innerHTML=`<div class="card h-100"><div class="card-body"><div class="d-flex justify-content-between align-items-center mb-1"><div class="fw-semibold">${v.title||v.filename||'视频'} <span class="badge bg-warning text-dark">待审核</span></div><span class="badge bg-light text-dark">#${v.id}</span></div><div class="text-muted small mb-1">教师:${v.teacherId??'-'} 课程:${v.courseId??'-'} | 大小:${formatSize(v.size)}</div><div class="text-muted small mb-2">上传时间:${uploaded||'-'}</div><div class="d-flex gap-2 flex-wrap"><button class="btn btn-sm btn-success" onclick="approveVideo(${v.id},1)">通过</button><button class="btn btn-sm btn-outline-danger" onclick="rejectVideo(${v.id})">不通过</button><a class="btn btn-sm btn-outline-secondary" href="${API}/videos/serve/${v.teacherId}/${v.courseId}/${encodeURIComponent(v.filename)}" target="_blank" rel="noreferrer">预览</a></div></div></div>`; box.appendChild(col); }); }
+    async function approveVideo(id, approved){ await axios.put(`${API}/videos/${id}/approve?approved=${approved}`); loadPendingVideos(); }
+    async function rejectVideo(id){ const remark=prompt('请填写不通过原因',''); await axios.put(`${API}/videos/${id}/approve?approved=-1&remark=${encodeURIComponent(remark||'不通过')}`); loadPendingVideos(); }
+
+    async function logout(){ try{ await axios.post(`${API}/auth/logout`);}catch(_){ } location.href='index.html'; }
+
+    setApiFromQuery();
+    loadMe();
+  </script>
+</body>
+</html>

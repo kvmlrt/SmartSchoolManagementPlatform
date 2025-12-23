@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>学生端 · 在线教育</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <style>
+    :root { --ink:#0f172a; --muted:#6b7280; --accent:#0ea5e9; --bg:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%); }
+    * { font-family:'Space Grotesk','Helvetica Neue',sans-serif; }
+    body { background: var(--bg); color: var(--ink); }
+    .app { max-width: 1180px; margin: 0 auto; padding: 28px 16px 52px; }
+    .card { border:0; box-shadow:0 10px 28px rgba(0,0,0,0.08); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h2 class="mb-0">学生端</h2>
+        <div class="text-muted small">课程查看 · 作业提交 · 成绩查询</div>
+        <div class="text-warning small">说明：仅 STUDENT 登录可访问；如未登录会自动跳回首页。</div>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <div id="user-info" class="small text-muted">检测登录中…</div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="logout()">退出</button>
+        <a class="btn btn-outline-primary btn-sm" href="index.html">返回首页</a>
+      </div>
+    </div>
+
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <div class="fw-semibold">教师公开课</div>
+            <div class="text-muted small">点击教师卡片进入 TA 的全部公开视频列表</div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-sm btn-outline-primary" onclick="loadCourses()">刷新</button>
+            <span class="text-muted small" id="course-refresh-info">--</span>
+          </div>
+        </div>
+        <div class="row g-3" id="course-list"><div class="col-12 text-muted">加载中…</div></div>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <div class="fw-semibold">作业任务</div>
+            <div class="text-muted small">根据你的班级自动列出，点击查看并提交</div>
+          </div>
+          <button class="btn btn-sm btn-outline-primary" onclick="loadAssignments()">刷新</button>
+        </div>
+        <div id="assignment-list" class="small text-muted" style="min-height:140px;">未加载</div>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">提交作业</div>
+              <div class="text-muted small mb-2" id="submit-asg-info">请先在上方选择作业</div>
+            <div class="mb-2"><textarea id="submit-content" class="form-control" rows="2" placeholder="文本内容（可选）"></textarea></div>
+            <div class="mb-2"><input id="submit-file" type="file" class="form-control" /></div>
+            <button class="btn btn-primary w-100" onclick="submitAssignment()">提交</button>
+            <div class="small text-muted mt-1">文件存储在 uploads/submissions/ 下。</div>
+              <input type="hidden" id="submit-asg-id" />
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">成绩查询</div>
+            <div class="row g-2 mb-2">
+              <div class="col-6"><input id="grade-stu-id" type="number" class="form-control" placeholder="当前学生ID" readonly /></div>
+              <div class="col-6"><input id="grade-stu-no" type="text" class="form-control" placeholder="当前学号" readonly /></div>
+            </div>
+            <div class="d-flex gap-2 mb-2">
+              <button class="btn btn-outline-primary" onclick="loadGrades()">查询本人成绩</button>
+              <button class="btn btn-outline-secondary" onclick="clearBox('grades-box')">清空</button>
+            </div>
+            <pre id="grades-box">等待查询…</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.7/dist/axios.min.js"></script>
+  <script>
+    axios.defaults.withCredentials=true;
+    let API='http://39.106.139.93:8081/api/v2';
+    let currentUser=null;
+    let selectedAssignmentId=null;
+
+    function clearBox(id){ const el=document.getElementById(id); if(el) el.textContent=''; }
+    function setApiFromQuery(){ const p=new URLSearchParams(location.search); const api=p.get('api'); if(api){ API=api.replace(/\/$/,''); } }
+    function ensureStudent(role){ if(role!=='STUDENT'){ document.getElementById('user-info').textContent='当前角色无权限，请用学生账号登录'; return false; } return true; }
+
+    async function loadMe(){
+      try{
+        const {data}=await axios.get(`${API}/auth/me`);
+        if(!data.loggedIn){ document.getElementById('user-info').textContent='未登录，请先返回首页登录'; return; }
+        currentUser=data;
+        if(!ensureStudent(data.role)) return;
+        document.getElementById('user-info').textContent=`${data.username} (${data.role})`;
+        if(currentUser.id){ document.getElementById('grade-stu-id').value=currentUser.id; }
+        if(currentUser.studentNumber){ document.getElementById('grade-stu-no').value=currentUser.studentNumber; }
+        loadAssignments();
+      }catch(_){ document.getElementById('user-info').textContent='会话检查失败，请重试或重新登录'; }
+    }
+
+    async function safeGet(path){ const {data}=await axios.get(`${API}${path}`); return data; }
+
+
+    function updateSubmitInfo(title){ const info=document.getElementById('submit-asg-info'); if(info) info.textContent=title?`当前作业：${title}`:'请先在上方选择作业'; }
+
+    async function submitAssignment(){
+      const id=selectedAssignmentId || document.getElementById('submit-asg-id').value;
+      if(!id) return alert('请先选择要提交的作业');
+      const content=document.getElementById('submit-content').value;
+      const file=document.getElementById('submit-file').files[0];
+      const fd=new FormData();
+      if(currentUser?.id) fd.append('studentId', currentUser.id);
+      if(content) fd.append('content', content);
+      if(file) fd.append('file', file);
+      try{
+        await axios.post(`${API}/assignments/${id}/submit`, fd, {headers:{'Content-Type':'multipart/form-data'}});
+        alert('提交成功');
+      }catch(_){ alert('提交失败'); }
+    }
+
+    function renderAssignments(data){
+      const box=document.getElementById('assignment-list');
+      if(!box) return;
+      if(!data||!data.length){ box.textContent='暂无作业'; return; }
+      box.innerHTML='';
+      data.forEach(a=>{
+        const due=a.dueDate||'-';
+        const item=document.createElement('div');
+        item.className='mb-1';
+        item.innerHTML=`<a href="#" class="text-decoration-none" onclick="selectAssignment(${a.id}, '${(a.title||'作业').replace(/'/g,"\\'")}'); return false;">${a.title||'未命名作业'}</a> · 截止:${due}`;
+        box.appendChild(item);
+      });
+      if(!selectedAssignmentId && data[0]?.id) selectAssignment(data[0].id, data[0].title||'未命名作业');
+    }
+
+    function selectAssignment(id, title){ selectedAssignmentId=id; const hidden=document.getElementById('submit-asg-id'); if(hidden) hidden.value=id; updateSubmitInfo(title); }
+
+    async function loadAssignments(){
+      const box=document.getElementById('assignment-list');
+      if(box) box.textContent='加载中…';
+      try{
+        const classId=currentUser?.classId;
+        const path=classId?`/assignments?classId=${classId}`:'/assignments';
+        const data=await safeGet(path);
+        renderAssignments(data);
+      }catch(e){ if(box) box.textContent=`加载失败：${e?.response?.data||e?.message||'错误'}`; }
+    }
+
+    async function loadCourses(){
+      const box=document.getElementById('course-list');
+      const info=document.getElementById('course-refresh-info');
+      if(info) info.textContent='加载中…';
+      box.innerHTML='<div class="col-12 text-muted">加载中…</div>';
+      try{
+        const data=await safeGet('/users/teachers');
+        box.innerHTML='';
+        if(!data.length){ box.innerHTML='<div class="col-12 text-muted">暂无教师</div>'; return; }
+        data.forEach(t=>{
+          const col=document.createElement('div');
+          col.className='col-12 col-md-6';
+          const tid=t.id??'';
+          col.innerHTML=`<a class="card h-100 text-decoration-none text-reset" href="videos.html?teacherId=${tid}">`
+            +`<div class="card-body">`
+            +`<div class="d-flex justify-content-between align-items-center mb-2"><h5 class="card-title mb-0">${t.username||'教师'}</h5></div>`
+            +`<div class="text-muted small mb-2">角色: ${t.role||'TEACHER'}</div>`
+            +`<div class="text-muted small">点击查看该教师的公开课程与视频</div>`
+            +`</div>`
+            +`</a>`;
+          box.appendChild(col);
+        });
+      }catch(e){
+        box.innerHTML='<div class="col-12 text-danger">加载教师失败</div>';
+      } finally {
+        if(info) info.textContent=`刷新时间 ${new Date().toLocaleTimeString()}`;
+      }
+    }
+
+    let courseTimer=null;
+    function startCourseAutoRefresh(){
+      if(courseTimer) clearInterval(courseTimer);
+      courseTimer=setInterval(loadCourses, 30000);
+    }
+
+    function renderGrades(data){
+      const box=document.getElementById('grades-box');
+      if(!data || (Array.isArray(data)&&!data.length)) { box.textContent='暂无成绩'; return; }
+      const list=Array.isArray(data)?data:[data];
+      const lines=list.map(g=>{
+        const score=g.score??g.grade??'--';
+        const status=typeof score==='number' ? (score>=60?'及格':'不及格') : '未知';
+        return `课程:${g.courseId??'-'} | 分数:${score} | 状态:${status} | 学生:${g.studentId??'-'} | 班级:${g.classId??'-'}${g.type?` | 类型:${g.type}`:''}`;
+      });
+      box.textContent=lines.join('\n');
+    }
+
+    async function loadGrades(){ const data=await safeGet('/grades'); renderGrades(data); }
+
+    async function logout(){ try{ await axios.post(`${API}/auth/logout`);}catch(_){ } location.href='index.html'; }
+
+    setApiFromQuery();
+    loadMe();
+    loadCourses();
+    startCourseAutoRefresh();
+  </script>
+</body>
+</html>

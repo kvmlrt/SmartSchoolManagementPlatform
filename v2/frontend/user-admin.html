@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>用户管理 · 管理员</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <style>
+    :root { --ink:#0f172a; --muted:#6b7280; --accent:#0ea5e9; --bg:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%); }
+    * { font-family:'Space Grotesk','Helvetica Neue',sans-serif; }
+    body { background: var(--bg); color: var(--ink); }
+    .app { max-width: 1180px; margin: 0 auto; padding: 28px 16px 52px; }
+    .card { border:0; box-shadow:0 10px 28px rgba(0,0,0,0.08); }
+    .table thead th { background:#f8fafc; }
+    .small-note { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h3 class="mb-1">用户账号管理</h3>
+        <div class="small-note">添加账号 · 修改密码 · 角色/班级/学号信息</div>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <div id="user-info" class="small-note">检测登录中…</div>
+        <a class="btn btn-outline-primary btn-sm" href="admin.html">返回管理台</a>
+        <button class="btn btn-outline-secondary btn-sm" onclick="logout()">退出</button>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-lg-5">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="fw-semibold">添加用户</div>
+              <span class="small-note">需管理员权限</span>
+            </div>
+            <div class="row g-2 mb-2">
+              <div class="col-12"><input id="new-username" class="form-control" placeholder="用户名" /></div>
+              <div class="col-12"><input id="new-password" type="password" class="form-control" placeholder="初始密码" /></div>
+              <div class="col-6">
+                <select id="new-role" class="form-select">
+                  <option value="STUDENT">学生</option>
+                  <option value="TEACHER">教师</option>
+                  <option value="ADMIN">管理员</option>
+                </select>
+              </div>
+              <div class="col-6"><input id="new-class" type="number" class="form-control" placeholder="班级ID(可选)" /></div>
+              <div class="col-12"><input id="new-student-number" class="form-control" placeholder="学号/工号(可选)" /></div>
+            </div>
+            <button class="btn btn-primary w-100" onclick="createUser()">添加用户</button>
+            <div id="create-tip" class="small-note mt-2"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="fw-semibold">用户列表</div>
+              <button class="btn btn-outline-primary btn-sm" onclick="loadUsers()">刷新</button>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>ID</th><th>用户名</th><th>角色</th><th>班级ID</th><th>学号/工号</th><th class="text-end">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="user-rows">
+                  <tr><td colspan="6" class="text-muted">未加载</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="list-tip" class="small-note mt-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.7/dist/axios.min.js"></script>
+  <script>
+    axios.defaults.withCredentials = true;
+    let API = 'http://39.106.139.93:8081/api/v2';
+    let currentUser = null;
+
+    function setApiFromQuery(){ const p=new URLSearchParams(location.search); const api=p.get('api'); if(api) API=api.replace(/\/$/,''); }
+    function ensureAdmin(role){ if(role!=='ADMIN'){ document.getElementById('user-info').textContent='当前角色无权限，请用管理员登录'; return false; } return true; }
+
+    async function loadMe(){
+      try{
+        const {data}=await axios.get(`${API}/auth/me`);
+        if(!data.loggedIn){ document.getElementById('user-info').textContent='未登录，请先登录'; return; }
+        currentUser=data;
+        if(!ensureAdmin(data.role)) return;
+        document.getElementById('user-info').textContent=`${data.username} (${data.role})`;
+        await loadUsers();
+      }catch(_){ document.getElementById('user-info').textContent='会话检查失败'; }
+    }
+
+    async function loadUsers(){
+      const box=document.getElementById('user-rows');
+      box.innerHTML='<tr><td colspan="6" class="text-muted">加载中…</td></tr>';
+      try{
+        const {data}=await axios.get(`${API}/admin/users`);
+        renderUsers(data||[]);
+        document.getElementById('list-tip').textContent=`共 ${data?.length||0} 个用户`;
+      }catch(e){
+        const status=e?.response?.status;
+        const raw=e?.response?.data;
+        const detail = status===403 ? '无权限/未登录' : (typeof raw==='object'?JSON.stringify(raw): (raw||e?.message||'错误'));
+        box.innerHTML=`<tr><td colspan="6" class="text-danger">加载失败：${detail}</td></tr>`;
+      }
+    }
+
+    function renderUsers(data){
+      const box=document.getElementById('user-rows');
+      if(!data.length){ box.innerHTML='<tr><td colspan="6" class="text-muted">暂无用户</td></tr>'; return; }
+      box.innerHTML='';
+      data.forEach(u=>{
+        const tr=document.createElement('tr');
+        const id=u.id??'';
+        tr.innerHTML=
+          `<td>${id}</td>`+
+          `<td>${u.username||''}</td>`+
+          `<td><select class="form-select form-select-sm" id="role-${id}">
+              <option value="STUDENT" ${u.role==='STUDENT'?'selected':''}>学生</option>
+              <option value="TEACHER" ${u.role==='TEACHER'?'selected':''}>教师</option>
+              <option value="ADMIN" ${u.role==='ADMIN'?'selected':''}>管理员</option>
+            </select></td>`+
+          `<td><input id="class-${id}" type="number" class="form-control form-control-sm" value="${u.classId??''}" /></td>`+
+          `<td><input id="stu-${id}" class="form-control form-control-sm" value="${u.studentNumber||''}" /></td>`+
+          `<td class="text-end">
+              <button class="btn btn-sm btn-outline-primary me-1" onclick="saveUser(${id})">保存</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="changePassword(${id}, '${u.username||''}')">改密</button>
+            </td>`;
+        box.appendChild(tr);
+      });
+    }
+
+    async function createUser(){
+      const tip=document.getElementById('create-tip');
+      const payload={
+        username: document.getElementById('new-username').value.trim(),
+        password: document.getElementById('new-password').value,
+        role: document.getElementById('new-role').value,
+        classId: parseInt(document.getElementById('new-class').value)||null,
+        studentNumber: document.getElementById('new-student-number').value.trim()||null
+      };
+      if(!payload.username || !payload.password){ tip.textContent='用户名/密码必填'; return; }
+      tip.textContent='提交中…';
+      try{
+        await axios.post(`${API}/admin/users`, payload);
+        tip.textContent='已创建';
+        document.getElementById('new-username').value='';
+        document.getElementById('new-password').value='';
+        document.getElementById('new-class').value='';
+        document.getElementById('new-student-number').value='';
+        await loadUsers();
+      }catch(e){ tip.textContent=`创建失败：${e?.response?.data?.error||e?.response?.data||'错误'}`; }
+    }
+
+    async function changePassword(id, username){
+      const pwd=prompt(`输入用户 ${username||id} 的新密码`,'');
+      if(!pwd) return;
+      try{
+        await axios.put(`${API}/admin/users/${id}/password`, {password: pwd});
+        alert('已更新密码');
+      }catch(e){ alert('修改失败'); }
+    }
+
+    async function saveUser(id){
+      const payload={
+        role: document.getElementById(`role-${id}`)?.value,
+        classId: (()=>{ const v=document.getElementById(`class-${id}`)?.value; return v?parseInt(v):null; })(),
+        studentNumber: document.getElementById(`stu-${id}`)?.value?.trim()||null
+      };
+      try{
+        await axios.put(`${API}/admin/users/${id}`, payload);
+        document.getElementById('list-tip').textContent='保存成功';
+        await loadUsers();
+      }catch(e){ alert('保存失败'); }
+    }
+
+    async function logout(){ try{ await axios.post(`${API}/auth/logout`);}catch(_){ } location.href='index.html'; }
+
+    setApiFromQuery();
+    loadMe();
+  </script>
+</body>
+</html>

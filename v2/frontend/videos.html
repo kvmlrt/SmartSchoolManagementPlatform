@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>教师公开视频库</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <style>
+    :root { --ink:#0f172a; --muted:#6b7280; --accent:#0ea5e9; --bg:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%); }
+    * { font-family:'Space Grotesk','Helvetica Neue',sans-serif; }
+    body { background: var(--bg); color: var(--ink); }
+    .app { max-width: 1180px; margin: 0 auto; padding: 28px 16px 48px; }
+    .card { border:0; box-shadow:0 10px 28px rgba(0,0,0,0.08); }
+    .video-thumb { position: relative; overflow: hidden; border-radius: 12px; background: linear-gradient(135deg,#0ea5e9,#3b82f6); height: 180px; }
+    .video-thumb img { width:100%; height:100%; object-fit: cover; display:block; }
+    .video-thumb .badge { position:absolute; top:10px; right:10px; }
+    .player-box { background:#0f172a; border-radius:14px; padding:14px; color:#e2e8f0; box-shadow:0 14px 32px rgba(0,0,0,0.25); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h2 class="mb-0">教师公开视频库</h2>
+        <div class="text-muted small">按教师查看所有公开视频，点击封面进入播放器</div>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-primary btn-sm" onclick="goBack()">返回</button>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+        <div class="fw-semibold">选择教师</div>
+        <input id="teacher-id" class="form-control" style="max-width:160px;" placeholder="教师ID" />
+        <button class="btn btn-primary btn-sm" onclick="loadFromInput()">加载视频</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadTeachers()">教师列表</button>
+        <div id="teacher-list" class="d-flex flex-wrap gap-2"></div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div id="video-tip" class="text-muted small">请选择教师查看视频</div>
+      <div id="bulk-actions" class="d-flex gap-2" style="display:none;">
+        <button class="btn btn-sm btn-danger" onclick="deleteSelected()">删除所选</button>
+      </div>
+    </div>
+
+    <div class="row g-3" id="video-grid">
+      <div class="col-12 text-muted">请选择教师查看视频</div>
+    </div>
+
+    <div class="mt-4 player-box" id="player-box" style="display:none;">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <div class="small text-muted">正在播放</div>
+          <div class="fw-semibold" id="player-title">视频标题</div>
+          <div class="small text-muted" id="player-meta"></div>
+        </div>
+        <a class="btn btn-sm btn-outline-light" id="player-download" target="_blank" rel="noreferrer">下载</a>
+      </div>
+      <video id="player" controls style="width:100%; border-radius:10px; background:#111; max-height:520px;"></video>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.7/dist/axios.min.js"></script>
+  <script>
+    axios.defaults.withCredentials=true;
+    let API='http://39.106.139.93:8081/api/v2';
+    let currentVideos=[];
+    let currentUser=null;
+    let selected=new Set();
+
+    function initFromQuery(){ const p=new URLSearchParams(location.search); const t=p.get('teacherId'); if(t){ document.getElementById('teacher-id').value=t; loadTeacherVideos(t); } }
+
+    function goBack(){ if(document.referrer){ history.back(); } else { location.href='index.html'; } }
+
+    async function loadMe(){ try{ const {data}=await axios.get(`${API}/users/me`); if(data.loggedIn) currentUser=data; }catch(_){ } }
+
+    async function loadTeachers(){ const {data}=await axios.get(`${API}/users/teachers`); const list=document.getElementById('teacher-list'); list.innerHTML=data.map(t=>`<button class="btn btn-outline-primary btn-sm" onclick="setTeacher(${t.id})">${t.username} (#${t.id})</button>`).join(''); }
+    function setTeacher(id){ document.getElementById('teacher-id').value=id; loadTeacherVideos(id); }
+    function loadFromInput(){ const id=document.getElementById('teacher-id').value; if(!id) return alert('请填写教师ID'); loadTeacherVideos(id); }
+
+    function renderGrid(videos){
+      const grid=document.getElementById('video-grid');
+      const tip=document.getElementById('video-tip');
+      if(!videos || !videos.length){ grid.innerHTML='<div class="col-12 text-muted">暂无视频</div>'; tip.textContent='暂无视频'; selected.clear(); toggleBulk(false); return; }
+      grid.innerHTML=''; tip.textContent=`共 ${videos.length} 条视频`;
+      videos.forEach(v=>{
+        const col=document.createElement('div');
+        col.className='col-12 col-md-6 col-lg-4';
+        const thumbUrl=v.thumbnailPath?`${API}/videos/thumb/${v.id}`:'';
+        const uploaded=v.uploadedAt?String(v.uploadedAt).replace('T',' '):'';
+        const deletable=canDelete(v);
+        const checkbox=deletable && isAdmin() ? `<div class="form-check form-check-sm mb-1"><input class="form-check-input" type="checkbox" onchange="toggleSelect(${v.id}, this.checked); event.stopPropagation();" ${selected.has(v.id)?'checked':''}></div>` : '';
+        const delBtn=deletable ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVideo(${v.id}); event.stopPropagation();">删除</button>` : '';
+        col.innerHTML=`<div class="card h-100" role="button" onclick='playVideo(${JSON.stringify(v.id)})'>
+          <div class="video-thumb mb-2">${thumbUrl?`<img src="${thumbUrl}" alt="thumb" />`:'<div class="w-100 h-100 d-flex align-items-center justify-content-center text-light fw-semibold">无封面</div>'}
+            <span class="badge bg-dark text-light">#${v.id}</span>
+          </div>
+          <div class="px-3 pb-3">
+            <div class="d-flex justify-content-between align-items-start">${checkbox}<div class="fw-semibold">${v.title||v.filename||'视频'}</div></div>
+            <div class="text-muted small">课程:${v.courseId??'-'} · 教师:${v.teacherId??'-'}</div>
+            <div class="text-muted small">大小:${formatSize(v.size)} · 时间:${uploaded||'-'}</div>
+            <div class="d-flex justify-content-between align-items-center mt-1">
+              <div class="text-primary small">点击封面播放</div>
+              ${delBtn}
+            </div>
+          </div>
+        </div>`;
+        grid.appendChild(col);
+      });
+      toggleBulk(isAdmin() && selected.size>0);
+    }
+
+    function formatSize(s){ if(!s) return '-'; const n=Number(s); if(n>1e9) return (n/1e9).toFixed(2)+' GB'; if(n>1e6) return (n/1e6).toFixed(2)+' MB'; if(n>1e3) return (n/1e3).toFixed(1)+' KB'; return n+' B'; }
+
+    function playVideo(id){ const v=currentVideos.find(x=>x.id===id); if(!v) return; const url=`${API}/videos/serve/${v.teacherId}/${v.courseId}/${encodeURIComponent(v.filename)}`; const player=document.getElementById('player'); player.src=url; document.getElementById('player-title').textContent=v.title||v.filename||'视频'; document.getElementById('player-meta').textContent=`课程:${v.courseId??'-'} · 教师:${v.teacherId??'-'} · 大小:${formatSize(v.size)}`; document.getElementById('player-download').href=url; document.getElementById('player-box').style.display='block'; player.scrollIntoView({behavior:'smooth'}); }
+
+    function isAdmin(){ return currentUser && currentUser.role==='ADMIN'; }
+    function isTeacher(){ return currentUser && currentUser.role==='TEACHER'; }
+    function canDelete(v){ if(isAdmin()) return true; if(isTeacher() && currentUser.id===v.teacherId) return true; return false; }
+
+    function toggleSelect(id, checked){ if(!isAdmin()) return; if(checked) selected.add(id); else selected.delete(id); toggleBulk(selected.size>0); }
+    function toggleBulk(show){ document.getElementById('bulk-actions').style.display=show?'flex':'none'; }
+
+    async function deleteVideo(id){
+      const v=currentVideos.find(x=>x.id===id);
+      if(!canDelete(v)) return alert('无权限删除');
+      if(!confirm('确认删除该视频吗？')) return;
+      await axios.delete(`${API}/videos/${id}`);
+      selected.delete(id);
+      await reloadCurrent();
+    }
+    async function deleteSelected(){ if(!isAdmin()) return alert('仅管理员可批量删除'); if(!selected.size) return; if(!confirm(`确认删除所选 ${selected.size} 条视频？`)) return; await axios.post(`${API}/videos/bulk-delete`, Array.from(selected)); selected.clear(); await reloadCurrent(); }
+
+    async function reloadCurrent(){ const tid=document.getElementById('teacher-id').value; if(tid) await loadTeacherVideos(tid); }
+
+    async function loadTeacherVideos(id){ const {data}=await axios.get(`${API}/videos/teachers/${id}`); currentVideos=data; selected.clear(); renderGrid(data); if(data&&data.length) playVideo(data[0].id); }
+
+    loadMe();
+    initFromQuery();
+  </script>
+</body>
+</html>
