@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>数据可视化 · 在线教育</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <style>
+    :root { --ink:#0f172a; --muted:#6b7280; --accent:#0ea5e9; --bg:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%); }
+    * { font-family:'Space Grotesk','Helvetica Neue',sans-serif; }
+    body { background: var(--bg); color: var(--ink); }
+    .app { max-width: 1180px; margin: 0 auto; padding: 28px 16px 52px; }
+    .card { border:0; box-shadow:0 10px 28px rgba(0,0,0,0.08); }
+    .chart-box { min-height: 320px; }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h2 class="mb-0">数据可视化</h2>
+        <div class="text-muted small">用户构成 · 年级分布 · 班级成绩趋势</div>
+        <div class="text-warning small">说明：仅 TEACHER / ADMIN 可访问；学生无权限。</div>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <div id="user-info" class="small text-muted">检测登录中…</div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="logout()">退出</button>
+        <a class="btn btn-outline-primary btn-sm" href="index.html">返回首页</a>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-2 align-items-end">
+          <div>
+            <label class="form-label small mb-1">年级（分布）</label>
+            <select id="grade-select" class="form-select" style="max-width:220px;"></select>
+          </div>
+          <div>
+            <label class="form-label small mb-1">班级（成绩趋势）</label>
+            <select id="class-select" class="form-select" style="max-width:220px;"></select>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-primary" onclick="loadAllCharts()">全部刷新</button>
+            <button class="btn btn-outline-primary" onclick="loadUserChart()">用户分布</button>
+            <button class="btn btn-outline-primary" onclick="loadGradeChart()">年级分布</button>
+            <button class="btn btn-outline-primary" onclick="loadClassLine()">班级趋势</button>
+          </div>
+          <div class="ms-auto small text-muted">数据源：/stats/users · /stats/grade-distribution · /stats/class-line</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="no-access" class="alert alert-danger" style="display:none;">当前角色无权限访问，请使用教师或管理员账号登录。</div>
+
+    <div id="chart-grid" style="display:none;">
+      <div class="row g-3 mb-3">
+        <div class="col-lg-4" id="user-card">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-semibold">用户构成</div>
+                <button class="btn btn-sm btn-outline-primary" onclick="loadUserChart()">刷新</button>
+              </div>
+              <div class="small muted mb-2">管理员可见整体用户角色占比</div>
+              <canvas id="user-pie" class="chart-box"></canvas>
+              <div id="user-note" class="small text-muted mt-2">等待加载…</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-8" id="grade-card">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-semibold">年级分布（柱状）</div>
+                <button class="btn btn-sm btn-outline-primary" onclick="loadGradeChart()">刷新</button>
+              </div>
+              <div class="small muted mb-2">可按年级ID过滤；为空则展示全部</div>
+              <canvas id="grade-bar" class="chart-box"></canvas>
+              <div id="grade-note" class="small text-muted mt-2">等待加载…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="fw-semibold">班级成绩趋势（折线）</div>
+            <button class="btn btn-sm btn-outline-primary" onclick="loadClassLine()">刷新</button>
+          </div>
+          <div class="small muted mb-2">输入班级ID，展示成绩/指标随时间或测试节点的走势</div>
+          <canvas id="class-line" class="chart-box"></canvas>
+          <div id="line-note" class="small text-muted mt-2">等待加载…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.7/dist/axios.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    axios.defaults.withCredentials=true;
+    let API='http://39.106.139.93:8081/api/v2';
+    let currentUser=null;
+    let isAdmin=false;
+    let gradeOptions=[];
+    const charts={ userPie:null, gradeBar:null, classLine:null };
+    const palette=['#0ea5e9','#22c55e','#f97316','#e11d48','#6366f1','#06b6d4','#facc15'];
+
+    function setApiFromQuery(){ const p=new URLSearchParams(location.search); const api=p.get('api'); if(api) API=api.replace(/\/$/,''); }
+    function ensureTeacher(role){ return role==='TEACHER' || role==='ADMIN'; }
+
+    async function loadMe(){
+      try{
+        const {data}=await axios.get(`${API}/auth/me`);
+        if(!data.loggedIn){ document.getElementById('user-info').textContent='未登录，请先返回首页登录'; return; }
+        currentUser=data;
+        isAdmin=data.role==='ADMIN';
+        document.getElementById('user-info').textContent=`${data.username} (${data.role})`;
+        if(!ensureTeacher(data.role)) { document.getElementById('no-access').style.display='block'; return; }
+        document.getElementById('chart-grid').style.display='block';
+        if(!isAdmin){
+          const userCard=document.getElementById('user-card'); if(userCard) userCard.style.display='none';
+          const gradeCard=document.getElementById('grade-card'); if(gradeCard) gradeCard.style.display='none';
+          const gradeSel=document.getElementById('grade-select'); if(gradeSel){ gradeSel.innerHTML='<option>仅管理员可用</option>'; gradeSel.disabled=true; }
+          await initTeacherClassSelect(data);
+        } else {
+          await initGradeAndClass(data);
+        }
+        loadAllCharts();
+      }catch(_){ document.getElementById('user-info').textContent='会话检查失败，请重试或重新登录'; }
+    }
+
+    async function safeGet(path){ const {data}=await axios.get(`${API}${path}`); return data; }
+
+    function setNote(id,msg){ const el=document.getElementById(id); if(el) el.textContent=msg; }
+    function destroyChart(key){ if(charts[key]){ charts[key].destroy(); charts[key]=null; } }
+
+    function normalizePairs(list){
+      if(!Array.isArray(list)) return [];
+      return list.map(item=>{
+        const gid=item.gradeLevelId||item.gradeId;
+        const cid=item.classId;
+        const gradeNameById=gid?gradeOptions.find(g=>g.id==gid)?.name:null;
+        let label=item.label||item.name||item.gradeName||item.className||item.subject||item.courseName||'';
+        if(!gradeNameById && label && /^\d+$/.test(label)){
+          const found=gradeOptions.find(g=>String(g.id)===String(label));
+          if(found) label=found.name||label;
+        }
+        if(gradeNameById) label=gradeNameById;
+        if(!label || label==='-' || label==='--') label=gradeNameById|| (gid?`年级${gid}`:'—');
+        if(cid && item.className && (gradeNameById||label)) label=`${gradeNameById||label}${item.className}`;
+        return {
+          label,
+          value:item.value??item.total??item.count??item.score??item.average??0
+        };
+      });
+    }
+
+    function extractSeries(raw){ if(Array.isArray(raw)) return normalizePairs(raw); if(raw?.series) return normalizePairs(raw.series); return []; }
+
+    function buildChart(key, ctx, config){ destroyChart(key); charts[key]=new Chart(ctx, config); }
+
+    async function loadUserChart(){
+      if(!isAdmin){ setNote('user-note','仅管理员可见'); destroyChart('userPie'); return; }
+      setNote('user-note','加载中…');
+      try{
+        const data=await safeGet('/stats/users');
+        const pairs=[];
+        if(data){
+          const map={ '学生': data.totalStudents??data.students??0, '教师': data.totalTeachers??data.teachers??0, '管理员': data.totalAdmins??data.admins??0 };
+          Object.entries(map).forEach(([k,v])=>{ pairs.push({label:k,value:Number(v)||0}); });
+          if(data.totalUsers!=null && pairs.every(p=>p.value===0)) pairs.push({label:'用户', value:Number(data.totalUsers)||0});
+        }
+        if(!pairs.length) throw new Error('暂无用户数据');
+        const labels=pairs.map(p=>p.label); const values=pairs.map(p=>p.value);
+        const ctx=document.getElementById('user-pie');
+        buildChart('userPie', ctx, {
+          type:'pie',
+          data:{ labels, datasets:[{ data:values, backgroundColor:palette }] },
+          options:{ plugins:{ legend:{ position:'bottom' } } }
+        });
+        setNote('user-note','加载完成');
+      }catch(e){ setNote('user-note',`加载失败: ${e?.message||e}`); destroyChart('userPie'); }
+    }
+
+    async function loadGradeChart(){
+      setNote('grade-note','加载中…');
+      try{
+        const gid=document.getElementById('grade-select').value;
+        const path=gid && gid!=='all'?`/stats/grade-distribution?gradeLevelId=${gid}`:'/stats/grade-distribution';
+        const raw=await safeGet(path);
+        const pairs=extractSeries(raw);
+        if(!pairs.length) throw new Error('暂无年级数据');
+        const labels=pairs.map(p=>p.label); const values=pairs.map(p=>p.value);
+        const ctx=document.getElementById('grade-bar');
+        buildChart('gradeBar', ctx, {
+          type:'bar',
+          data:{ labels, datasets:[{ label:'人数/统计值', data:values, backgroundColor:palette[0], borderRadius:6 }] },
+          options:{ scales:{ y:{ beginAtZero:true } } }
+        });
+        setNote('grade-note','加载完成');
+      }catch(e){ setNote('grade-note',`加载失败: ${e?.message||e}`); destroyChart('gradeBar'); }
+    }
+
+    async function loadClassLine(){
+      const cid=document.getElementById('class-select').value;
+      if(!cid){ setNote('line-note','请选择班级'); destroyChart('classLine'); return; }
+      setNote('line-note','加载中…');
+      try{
+        const raw=await safeGet(`/stats/class-line?classId=${cid}`);
+        const pairs=extractSeries(raw);
+        if(!pairs.length) throw new Error('暂无班级数据');
+        const labels=pairs.map(p=>p.label); const values=pairs.map(p=>p.value);
+        const ctx=document.getElementById('class-line');
+        buildChart('classLine', ctx, {
+          type:'line',
+          data:{ labels, datasets:[{ label:'成绩/指标', data:values, borderColor:palette[1], backgroundColor:'rgba(34,197,94,0.12)', fill:true, tension:0.3, pointRadius:4 }] },
+          options:{ scales:{ y:{ beginAtZero:true } } }
+        });
+        setNote('line-note','加载完成');
+      }catch(e){ setNote('line-note',`加载失败: ${e?.message||e}`); destroyChart('classLine'); }
+    }
+
+    function loadAllCharts(){
+      if(isAdmin){
+        loadUserChart();
+        loadGradeChart();
+        loadClassLine();
+      } else {
+        setNote('user-note','仅管理员可见');
+        setNote('grade-note','仅管理员可见');
+        loadClassLine();
+      }
+    }
+
+    async function initGradeAndClass(user){
+      const gradeSel=document.getElementById('grade-select');
+      const classSel=document.getElementById('class-select');
+      gradeSel.innerHTML='<option value="all">全部年级</option>';
+      classSel.innerHTML='<option value="">请选择班级</option>';
+      try{
+        gradeOptions=await safeGet('/reports/grade-levels');
+        gradeOptions.forEach(g=>{ const opt=document.createElement('option'); opt.value=g.id; opt.textContent=g.name||(`年级${g.id}`); gradeSel.appendChild(opt); });
+        const defaultGrade=user?.gradeLevelId || (gradeOptions[0]?.id ?? 'all');
+        gradeSel.value=defaultGrade;
+        await loadClassesForGrade(defaultGrade, user?.classId);
+      }catch(_){ gradeOptions=[]; }
+      gradeSel.addEventListener('change', async ()=>{ const gid=gradeSel.value; await loadClassesForGrade(gid,''); loadGradeChart(); });
+      classSel.addEventListener('change', ()=>{ loadClassLine(); });
+    }
+
+    async function loadClassesForGrade(gid, preferClassId){
+      const classSel=document.getElementById('class-select');
+      classSel.innerHTML='<option value="">请选择班级</option>';
+      if(!gid || gid==='all') return;
+      try{
+        const classes=await safeGet(`/reports/grade-levels/${gid}/classes`);
+        classes.forEach(c=>{ const opt=document.createElement('option'); opt.value=c.id; opt.textContent=c.name||(`班级${c.id}`); classSel.appendChild(opt); });
+        if(preferClassId){ classSel.value=preferClassId; }
+        if(!preferClassId && classes[0]) classSel.value=classes[0].id;
+      }catch(_){ /* ignore */ }
+    }
+
+    async function initTeacherClassSelect(user){
+      const classSel=document.getElementById('class-select');
+      classSel.innerHTML='';
+      const cid=user?.classId;
+      const opt=document.createElement('option');
+      if(cid){ opt.value=cid; opt.textContent=`我的班级(${cid})`; classSel.appendChild(opt); classSel.value=cid; }
+      else { opt.value=''; opt.textContent='无班级权限'; classSel.appendChild(opt); classSel.value=''; }
+      classSel.disabled=!cid;
+    }
+
+    async function logout(){ try{ await axios.post(`${API}/auth/logout`);}catch(_){ } location.href='index.html'; }
+
+    setApiFromQuery();
+    loadMe();
+  </script>
+</body>
+</html>
